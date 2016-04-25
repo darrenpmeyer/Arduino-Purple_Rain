@@ -1,46 +1,37 @@
-#include <FastLED.h>
-#undef DEBUG
+#include <FastLED.h> // see http://fastled.io; uses branch FastLED3.1
 
-#ifdef DEBUG
-    void start_debugging() {
-        Serial.begin(9600);
-    }
-#endif
+// Configure LED driver
+#define DATA_PIN 1        // digital pin used for LED strip/ring data line
+#define LED_COUNT 12      // how many LEDs in the strip/ring
+#define DRIVER NEOPIXEL   // which FastLED driver to use
 
-#undef STRIP
-#define BADGE
+// Configure behavior
+#define DECAY_DELAY 20    // delay between each tick
+#define BRIGHT_BASE 128   // minimum brightness for a fresh drop
+#define BRIGHT_ADD 127    // add this to above for maximum brightness of a fresh drop
+#define CHANCE_OF_DROP 10 // the percent chance a dark drop will become fresh
+#define DIM_RATE 8        // max amount to dim on each tick
 
-#ifdef STRIP
-#define DATA_PIN 11
-#define LED_COUNT 30
-#endif
+// global variables
+CRGB led[LED_COUNT];     // Addresses the pixels via FastLED, must be RGB space
+CHSV drops[LED_COUNT];   // Addresses the colors using HSV space; must map to led[] to display
 
-#ifdef BADGE
-#define DATA_PIN 1
-#define LED_COUNT 12
-#endif
 
-#define DRIVER NEOPIXEL
-
-#define DECAY_DELAY 20
-
-CRGB led[LED_COUNT];
-CHSV drops[LED_COUNT];
-
+/* seed_drop() - a rain drop "hits" a pixel
+ * note that this function doesn't specify which pixel, that's on you
+ */
 CHSV seed_drop() {
-    CHSV drop = CHSV(HUE_PURPLE, 255, random8(128)+127);
+    CHSV drop = CHSV(HUE_PURPLE, 255, random8(BRIGHT_BASE)+BRIGHT_ADD);
     return(drop);
 }
 
-
-
+/* In the Arduino setup phase, configure the driver, seed the first drops, and
+ * show a black strip
+ */
 void setup() {
-    delay(250);
+    delay(250);  // on some boards, this _really_ helps with catching the reset for re-programming
 
-    #ifdef DEBUG
-        start_debugging();
-    #endif
-
+    // Add LEDs, set the color correction profile, and set all pixels black
     FastLED.addLeds<DRIVER, DATA_PIN>(led, LED_COUNT).setCorrection(TypicalLEDStrip);
     fill_solid(led, LED_COUNT, CRGB::Black);
 
@@ -49,29 +40,35 @@ void setup() {
     for (uint8_t i = 0; i < numdrops; i++) {
         drops[i] = seed_drop();
     }
-    FastLED.show();
+    FastLED.show(); // this will show all black, because led[] is still all black
 }
 
+
+/* In the Arduino loop phase, each tick dims bright drops and has a chance to
+ * make fresh drops out of dim/dark pixels
+ */
 void loop() {
     for (uint8_t i = 0; i < LED_COUNT; i++) {
+        // if the drops are very dim or off, there's a chance to make them fresh drops on this tick
         if (drops[i].v <= 10) {
-            if (random8(100) < 10) {
-                // chance that dim/off becomes lit
+            if (random8(100) < CHANCE_OF_DROP) {
                 drops[i] = seed_drop();
             }
         }
 
+        // if they are lit *at all*, dim them by 0..DIM_RATE
         if (drops[i].v > 0) {
-            drops[i].v = drops[i].v-random8(8);
+            drops[i].v = drops[i].v-random8(DIM_RATE);
         }
 
         led[i] = drops[i]; // Map to CRGB space for display
+        /* TODO: use a FastLED fade function
+         * the fade functions can work on RGB space, avoid mapping, and that
+         * would improve performance and shrink the compiled sketch (proabably)
+         */
     }
 
+    // Show, then wait for next tick. Personal preference, you could reverse these
     FastLED.show();
     FastLED.delay(DECAY_DELAY);
-
-    #ifdef DEBUG
-        Serial.println("tick");
-    #endif
 }
